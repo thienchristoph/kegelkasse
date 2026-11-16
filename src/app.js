@@ -63,7 +63,7 @@ const byId = id => S.evenings.find(e => e.id === id);
 
 // ---------- Schreiben ----------
 const evRef = id => doc(db, "evenings", id);
-function w(p) { p.catch(err => { console.error(err); toast("Nicht gespeichert: keine Berechtigung"); }); }
+function w(p) { p.catch(err => { console.error(err); if (isVertreter && err.code === "permission-denied") return onErr(err); toast("Nicht gespeichert: keine Berechtigung"); }); }
 const saveEntries = ev => w(updateDoc(evRef(ev.id), { entries: ev.entries }));
 
 // ---------- UI-Helfer ----------
