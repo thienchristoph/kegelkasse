@@ -13,7 +13,7 @@ service cloud.firestore {
       let s = get(sess()).data;
       return signed() && s.role in roles && pinValid(s.pin, s.role);
     }
-    function member() { return hasRole(['schrift', 'praes', 'kass', 'admin']); }
+    function member() { return hasRole(['mitglied', 'schrift', 'praes', 'kass', 'admin']); }
     // eingeloggt mit eigener (nicht-Vertretungs-)PIN
     function isHolder() { return signed() && !('until' in get(pinPath(get(sess()).data.pin)).data); }
 

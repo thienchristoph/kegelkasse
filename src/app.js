@@ -13,7 +13,8 @@ const auth = getAuth(app);
 const db = initializeFirestore(app, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) });
 
 // ---------- Konstanten & Helfer ----------
-const ROLES = { schrift: "Schriftführer", praes: "Präsident", kass: "Kassierer", admin: "Admin" };
+const ROLES = { mitglied: "Mitglied", schrift: "Schriftführer", praes: "Präsident", kass: "Kassierer", admin: "Admin" };
+const OFFICERS = ["schrift", "praes", "kass", "admin"];
 const TOP = ["Pumpe", "Vorsagen", "Betrug", "Kugel bringen erfolgreich"];
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 const eur = c => (c / 100).toLocaleString("de-DE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
@@ -26,7 +27,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 // ---------- Zustand (Spiegel der Datenbank) ----------
 const S = { members: [], catalog: [], settings: { beitrag: 1500, extra: 250, iban: "", bic: "" }, evenings: [], ledger: [], guests: {} };
 let role = null, view = null, editEvening = null, loaded = {};
-const UI = { mode: null, active: null };
+const UI = { mode: null, active: null, statYear: null };
 let pending = false;
 let isVertreter = false; try { isVertreter = localStorage.getItem("kk-vertr") === "1"; } catch (e) { }
 let vList = [];
@@ -139,7 +140,7 @@ function startListeners() {
     track("evenings", s); renderSafe();
   }, onErr));
   unsubs.push(onSnapshot(collection(db, "ledger"), opt, s => { S.ledger = s.docs.map(d => ({ id: d.id, ...d.data() })); track("ledger", s); renderSafe(); }, onErr));
-  if (!isVertreter) {
+  if (!isVertreter && OFFICERS.includes(role)) {
     const q = (role === "praes" || role === "admin") ? query(collection(db, "pins"), where("vertretung", "==", true))
       : query(collection(db, "pins"), where("vertretung", "==", true), where("role", "==", role));
     unsubs.push(onSnapshot(q, s => { vList = s.docs.map(d => ({ pin: d.id, ...d.data() })); renderSafe(); }, e => console.warn(e)));
@@ -156,7 +157,8 @@ function tabs() {
   if (role === "schrift" || role === "admin") t.push(["abend", "Kegelabend"]);
   if (role === "praes" || role === "admin") t.push(["pruefen", "Prüfen & PDF"]);
   if (role === "kass" || role === "admin") t.push(["offen", "Offene Beträge"], ["katalog", "Katalog & Einstellungen"], ["mitglieder", "Mitglieder"]);
-  if (!isVertreter) t.push(["vertretung", "Vertretung"]);
+  t.push(["statistik", "Statistik"]);
+  if (!isVertreter && OFFICERS.includes(role)) t.push(["vertretung", "Vertretung"]);
   if (role === "admin") t.push(["admin", "PINs"]);
   return t;
 }
@@ -175,7 +177,7 @@ function render() {
   if (!loaded.evenings || !loaded.members) { $("#main").innerHTML = `<div class="card">Lade Daten …</div>`; return; }
   if (!view || !t.find(x => x[0] === view)) view = t[0][0];
   $("#nav").innerHTML = t.map(([k, l]) => `<button class="${k === view ? "sel" : ""}" onclick="go('${k}')">${l}</button>`).join("");
-  ({ abend: vAbend, pruefen: vPruefen, offen: vOffen, katalog: vKatalog, mitglieder: vMitglieder, admin: vAdmin, vertretung: vVertretung })[view]();
+  ({ abend: vAbend, pruefen: vPruefen, offen: vOffen, katalog: vKatalog, mitglieder: vMitglieder, admin: vAdmin, vertretung: vVertretung, statistik: vStatistik })[view]();
   if (isVertreter) $("#main").insertAdjacentHTML("afterbegin", `<div class="hi">Du bist als <b>Vertretung</b> für ${ROLES[role]} angemeldet. Der Zugang endet automatisch.</div>`);
 }
 
@@ -426,6 +428,74 @@ function vMitglieder() {
 function toggleMem(id) { const m = S.members.find(x => x.id === id); w(updateDoc(doc(db, "members", id), { active: !m.active })); }
 function addMem() { const l = $("#ml").value.trim(), f = $("#mf").value.trim(); if (!l) return; w(setDoc(doc(db, "members", uid()), { last: l, first: f, active: true })); }
 
+// ---------- Statistik ----------
+function setStatYear(y) { UI.statYear = y; render(); }
+function bars(rows, fmt, max) {
+  const m = max ?? Math.max(1, ...rows.map(r => r[1]));
+  return `<table>${rows.map(([n, v, extra]) => `<tr><td style="width:40%">${esc(n)}</td><td><div style="background:var(--red);opacity:.85;height:14px;border-radius:7px;width:${Math.max(2, Math.round(v / m * 100))}%"></div></td><td class="r" style="white-space:nowrap">${fmt(v)}${extra ? ` <span class="mut">${extra}</span>` : ""}</td></tr>`).join("")}</table>`;
+}
+function vStatistik() {
+  const years = [...new Set(S.evenings.filter(e => e.status === "final").map(e => e.date.slice(0, 4)))].sort().reverse();
+  const cur = String(new Date().getFullYear());
+  if (!UI.statYear) UI.statYear = years.includes(cur) ? cur : (years[0] || cur);
+  const Y = UI.statYear;
+  const evs = S.evenings.filter(e => e.status === "final" && (Y === "alle" || e.date.startsWith(Y)));
+  const sel = `<div class="row" style="margin-bottom:12px">${years.map(y => `<button class="${y === Y ? "sel" : ""}" onclick="setStatYear('${y}')">${y}</button>`).join("")}<button class="${Y === "alle" ? "sel" : ""}" onclick="setStatYear('alle')">Gesamt</button></div>`;
+  if (!evs.length) { $("#main").innerHTML = `<div class="card"><h2>Statistik</h2>${sel}<p class="mut">Noch keine abgeschlossenen Kegelabende in diesem Zeitraum. Die Statistik füllt sich nach dem ersten final abgeschlossenen Abend.</p></div>`; return; }
+  const mem = S.members.slice();
+  const P = {}; const get = k => P[k] || (P[k] = { straf: 0, abende: 0, fehlt: 0, fehltKosten: 0, best: 0, bestDate: "", cats: {} });
+  const catTotals = {}; let strafSum = 0, beitragSum = 0, anwesendSum = 0;
+  evs.forEach(ev => {
+    const pres = mem.filter(m => !ev.absent[m.id]).map(m => m.id).concat(ev.guests.map(g => g.key));
+    const mx = Math.max(0, ...pres.map(k => ev.entries.filter(e => e.key === k).reduce((a, e) => a + e.amount, 0)));
+    anwesendSum += pres.length;
+    pres.forEach(k => { const p = get(k); p.abende++; const s = ev.entries.filter(e => e.key === k).reduce((a, e) => a + e.amount, 0); p.straf += s; if (s > p.best) { p.best = s; p.bestDate = ev.date; } strafSum += s; beitragSum += S.settings.beitrag; });
+    mem.filter(m => ev.absent[m.id]).forEach(m => { const p = get(m.id); p.fehlt++; p.fehltKosten += mx; strafSum += mx; beitragSum += S.settings.beitrag; });
+    ev.entries.forEach(e => { const n = e.text.split(":")[0]; get(e.key).cats[n] = (get(e.key).cats[n] || 0) + 1; catTotals[n] = (catTotals[n] || 0) + 1; });
+  });
+  const extra = {}; S.ledger.filter(l => l.type === "extra" && (Y === "alle" || l.date.startsWith(Y))).forEach(l => extra[l.key] = (extra[l.key] || 0) + 1);
+  const isMem = k => !k.startsWith("g:");
+  const people = Object.entries(P).filter(([k]) => isMem(k) && S.members.some(m => m.id === k));
+  const nm = k => shortName(k);
+  const catCount = (k, needle) => Object.entries(P[k].cats).filter(([n]) => n.toLowerCase().includes(needle)).reduce((a, [, c]) => a + c, 0);
+  const champ = (fn) => { let best = null; people.forEach(([k, p]) => { const v = fn(k, p); if (v > 0 && (!best || v > best.v)) best = { k, v }; }); return best; };
+  const titles = [];
+  const add = (icon, title, w, txt) => { if (w) titles.push(`<div class="card" style="margin:0"><div style="font-size:28px">${icon}</div><b>${title}</b><div style="font-size:18px;margin:4px 0">${esc(nm(w.k))}</div><div class="mut">${txt(w.v)}</div></div>`); };
+  add("💰", "Hauptsponsor der Kegeltour", champ((k, p) => p.straf), v => `${eur(v)} Strafen`);
+  const weiss = people.filter(([, p]) => p.abende >= Math.min(3, evs.length)).map(([k, p]) => ({ k, v: p.straf / p.abende })).sort((a, b) => a.v - b.v)[0];
+  if (weiss) titles.push(`<div class="card" style="margin:0"><div style="font-size:28px">😇</div><b>Weiße Weste</b><div style="font-size:18px;margin:4px 0">${esc(nm(weiss.k))}</div><div class="mut">nur ${eur(Math.round(weiss.v))} Strafen pro Abend</div></div>`);
+  add("🎳", "Pumpenkönig", champ(k => catCount(k, "pumpe")), v => `${v}× gepumpt`);
+  add("🗣️", "Plaudertasche", champ(k => catCount(k, "vorsagen")), v => `${v}× vorgesagt`);
+  add("🃏", "Betrüger vom Dienst", champ(k => catCount(k, "betrug")), v => `${v}× erwischt`);
+  add("📦", "Kugel-Kurier", champ(k => catCount(k, "kugel bringen")), v => `${v}× Kugel gebracht`);
+  add("🔔", "Klingelfee", champ(k => catCount(k, "klingel")), v => `${v}× am Klingelband`);
+  add("🚶", "Bahnwanderer", champ(k => catCount(k, "betreten")), v => `${v}× unerlaubt auf der Bahn`);
+  add("🙌", "Zwei-Hand-Akrobat", champ(k => catCount(k, "zwei händen")), v => `${v}× beidhändig`);
+  add("🔥", "Rekordabend", champ((k, p) => p.best), v => { const w = people.find(([k, p]) => p.best === v); return `${eur(v)} an einem Abend (${fmtDate(w[1].bestDate)})`; });
+  add("🛋️", "Teuerstes Fernbleiben", champ((k, p) => p.fehltKosten), v => `${eur(v)} Höchststrafe fürs Fehlen`);
+  add("🏠", "Stammgast", champ((k, p) => p.abende), v => `${v} von ${evs.length} Abenden dabei`);
+  add("⏰", "Zinszahler des Jahres", champ(k => extra[k] || 0), v => `${v}× Extrastrafe fürs Nichtzahlen`);
+  const avgStraf = Math.round(strafSum / evs.length);
+  const bier = Math.floor(strafSum / 250);
+  const ranking = people.map(([k, p]) => [nm(k), p.straf, p.abende ? `⌀ ${eur(Math.round(p.straf / p.abende))}` : ""]).sort((a, b) => b[1] - a[1]);
+  const att = people.map(([k, p]) => [nm(k), Math.round(p.abende / evs.length * 100), `${p.abende}/${evs.length}`]).sort((a, b) => b[1] - a[1]);
+  const topCats = Object.entries(catTotals).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  $("#main").innerHTML = `<div class="card"><h2>Statistik</h2>${sel}
+    <div class="cats" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">
+      <div class="card" style="margin:0"><div class="mut">Kegelabende</div><b style="font-size:24px">${evs.length}</b></div>
+      <div class="card" style="margin:0"><div class="mut">Strafen gesamt</div><b style="font-size:24px">${eur(strafSum)}</b></div>
+      <div class="card" style="margin:0"><div class="mut">⌀ Strafen pro Abend</div><b style="font-size:24px">${eur(avgStraf)}</b></div>
+      <div class="card" style="margin:0"><div class="mut">Beiträge</div><b style="font-size:24px">${eur(beitragSum)}</b></div>
+      <div class="card" style="margin:0"><div class="mut">⌀ Anwesende</div><b style="font-size:24px">${(anwesendSum / evs.length).toFixed(1).replace(".", ",")}</b></div>
+      <div class="card" style="margin:0"><div class="mut">Das sind etwa</div><b style="font-size:24px">🍺 ${bier}</b><div class="mut">Bier à 2,50 €</div></div>
+    </div></div>
+  <div class="card"><h2>Ehrentitel</h2><div class="cats" style="grid-template-columns:repeat(auto-fill,minmax(170px,1fr))">${titles.join("")}</div></div>
+  <div class="card"><h2>Strafen pro Kegler</h2>${bars(ranking, eur)}</div>
+  <div class="card"><h2>Anwesenheit</h2>${bars(att, v => v + " %", 100)}</div>
+  <div class="card"><h2>Häufigste Strafen</h2>${bars(topCats, v => v + "×")}</div>
+  <p class="mut">Grundlage: final abgeschlossene Abende. Abwesende zählen mit der Höchststrafe des Abends.</p>`;
+}
+
 // ---------- Vertretung ----------
 const fmtDT = ms => new Date(ms).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) + " Uhr";
 const vLink = v => `${location.origin}${location.pathname}#v-${v.role}-${v.pin}`;
@@ -497,7 +567,7 @@ async function setupSeed(pins) {
 }
 
 // ---------- Start ----------
-Object.assign(window, { closeSheet, runConfirm, pickRole, login, logout, go, newEvening, setMode, setActive, back, edit, toDraft, pd, delE, freeDlg, addFreeE, toggleAbs, addGuest, delGuest, askFinal, askUnfinal, makePdf, sharePdf, openPdf, askDelete, pay, unpay, addStart, saveSettings, catSet, catDel, catAdd, toggleMem, addMem, setPin, kickAll, setupSeed, createV, shareV, endV });
+Object.assign(window, { closeSheet, runConfirm, pickRole, login, logout, go, newEvening, setMode, setActive, back, edit, toDraft, pd, delE, freeDlg, addFreeE, toggleAbs, addGuest, delGuest, askFinal, askUnfinal, makePdf, sharePdf, openPdf, askDelete, pay, unpay, addStart, saveSettings, catSet, catDel, catAdd, toggleMem, addMem, setPin, kickAll, setupSeed, createV, shareV, endV, setStatYear });
 $("#roleBtn").onclick = openLogin;
 let linkLogin = null;
 { const m = location.hash.match(/^#v-(schrift|kass)-(\d{4,})$/); if (m) { linkLogin = { r: m[1], pin: m[2] }; history.replaceState(null, "", location.pathname); } }
