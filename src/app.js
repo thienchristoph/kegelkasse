@@ -34,15 +34,16 @@ let vList = [];
 
 // ---------- Rechenlogik ----------
 const memberName = m => `${m.last}, ${m.first}`;
+const nick = m => (m.nick && m.nick.trim()) || m.first.split(" ")[0];
 function personName(key) {
   if (key.startsWith("g:")) return (S.guests[key] || key.slice(2)) + " (Gast)";
-  const m = S.members.find(x => x.id === key); return m ? memberName(m) : "?";
+  const m = S.members.find(x => x.id === key); return m ? nick(m) : "?";
 }
 function shortName(k) {
   if (k.startsWith("g:")) return (S.guests[k] || k.slice(2)) + " (Gast)";
-  const m = S.members.find(x => x.id === k); return m ? `${m.last}, ${m.first.charAt(0)}.` : "?";
+  const m = S.members.find(x => x.id === k); return m ? nick(m) : "?";
 }
-const activeMembers = () => S.members.filter(m => m.active).sort((a, b) => (a.last + a.first).localeCompare(b.last + b.first, "de"));
+const activeMembers = () => S.members.filter(m => m.active).sort((a, b) => nick(a).localeCompare(nick(b), "de"));
 const balance = key => S.ledger.filter(e => e.key === key).reduce((a, e) => a + e.amount, 0);
 const present = ev => activeMembers().filter(m => !ev.absent[m.id]).map(m => m.id).concat(ev.guests.map(g => g.key));
 const strafSum = (ev, key) => ev.entries.filter(e => e.key === key).reduce((a, e) => a + e.amount, 0);
@@ -216,7 +217,7 @@ function renderEvening(ev) {
     ${!pres.length ? '<p class="mut">Niemand anwesend.</p>' : mode === "raster" ? gridHtml(ev, pres, editable) : keglerHtml(ev, pres, editable)}
   </div>
   <div class="card"><h2>Anwesenheit</h2><p class="mut">Antippen schaltet um zwischen anwesend und abwesend.</p>
-    <div class="row">${activeMembers().map(m => `<button class="${ev.absent[m.id] ? "" : "sel"}" ${editable ? "" : "disabled"} onclick="toggleAbs('${ev.id}','${m.id}')">${esc(m.last)}, ${esc(m.first.split(" ")[0])}</button>`).join("")}</div>
+    <div class="row">${activeMembers().map(m => `<button class="${ev.absent[m.id] ? "" : "sel"}" ${editable ? "" : "disabled"} onclick="toggleAbs('${ev.id}','${m.id}')">${esc(nick(m))}</button>`).join("")}</div>
   </div>
   <div class="card"><h2>Gäste</h2><div class="row"><input id="gname" class="grow" placeholder="Name des Gastes" value="${esc(gname)}"><button onclick="addGuest('${ev.id}')" ${editable ? "" : "disabled"}>Gast hinzufügen</button></div>
     ${ev.guests.length ? `<ul class="entries">${ev.guests.map(g => `<li><span>${esc(S.guests[g.key] || g.key.slice(2))}</span>${editable && !ev.entries.some(e => e.key === g.key) ? `<button onclick="delGuest('${ev.id}','${g.key}')">Entfernen</button>` : ""}</li>`).join("")}</ul>` : ""}
@@ -358,7 +359,7 @@ async function makePdf(date) {
   pdf.setFont("helvetica", "bold"); pdf.setFontSize(15);
   pdf.text(`Ausstehende Kegelbeiträge zum ${fmtDate(date)}`, 20, 38);
   try { const img = await fetch("logo.png").then(r => r.blob()).then(b => new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(b); })); pdf.addImage(img, "PNG", 145, 18, 45, 35); } catch (e) { }
-  const rows = activeMembers().map(m => [memberName(m), balance(m.id)])
+  const rows = activeMembers().slice().sort((a, b) => (a.last + a.first).localeCompare(b.last + b.first, "de")).map(m => [memberName(m), balance(m.id)])
     .concat(Object.keys(S.guests).filter(k => balance(k) > 0).map(k => [S.guests[k] + " (Gast)", balance(k)]));
   const x0 = 20, x1 = 115, x2 = 150, x3 = 190; let y = 60; const rh = 8.5;
   pdf.setFillColor(217, 217, 217); pdf.rect(x0, y, x3 - x0, 13, "F");
@@ -394,7 +395,7 @@ function vOffen() {
   <td class="r">${r.b > 0 ? `<button class="ok" onclick="pay('${r.k}')">Bezahlt</button>` : `<span class="mut">bezahlt ${eur(-r.paid.amount)}</span> <button onclick="unpay('${r.paid.id}')">Rückgängig</button>`}</td></tr>`).join("")}
   <tr><td><b>Summe offen</b></td><td class="r"><b>${eur(total)}</b></td><td></td></tr></table></div>
   <div class="card"><h2>Anfangssaldo / Korrektur</h2><p class="mut">Einmalig beim Start oder für Korrekturen. Positiv = schuldet, negativ = Guthaben.</p>
-  <div class="row"><select id="sk">${activeMembers().map(m => `<option value="${m.id}">${esc(memberName(m))}</option>`).join("")}</select><input id="sa" inputmode="decimal" placeholder="Betrag €" style="width:120px"><button onclick="addStart()">Buchen</button></div>
+  <div class="row"><select id="sk">${activeMembers().map(m => `<option value="${m.id}">${esc(nick(m))} (${esc(memberName(m))})</option>`).join("")}</select><input id="sa" inputmode="decimal" placeholder="Betrag €" style="width:120px"><button onclick="addStart()">Buchen</button></div>
   ${S.ledger.filter(e => e.type === "start").length ? `<ul class="entries">${S.ledger.filter(e => e.type === "start").map(e => `<li><span>${esc(personName(e.key))} · ${fmtDate(e.date)}</span><span>${eur(e.amount)} <button onclick="unpay('${e.id}')">Löschen</button></span></li>`).join("")}</ul>` : ""}</div>`;
 }
 function pay(k) { w(setDoc(doc(db, "ledger", uid()), { key: k, date: today(), type: "zahlung", amount: -balance(k), text: "Zahlung", at: Date.now() })); }
@@ -421,10 +422,12 @@ function catAdd() {
   w(setDoc(doc(db, "catalog", uid()), { name: n, amount: a ? toCents(a) : 0, free: !a, order }));
 }
 function vMitglieder() {
-  $("#main").innerHTML = `<div class="card"><h2>Mitglieder</h2><table>${S.members.slice().sort((a, b) => (a.last + a.first).localeCompare(b.last + b.first, "de")).map(m => `<tr><td>${esc(memberName(m))}</td><td class="r"><button onclick="toggleMem('${m.id}')">${m.active ? "Deaktivieren" : "Aktivieren"}</button></td></tr>`).join("")}</table>
+  $("#main").innerHTML = `<div class="card"><h2>Mitglieder</h2><table>${S.members.slice().sort((a, b) => (a.last + a.first).localeCompare(b.last + b.first, "de")).map(m => `<tr><td>${esc(memberName(m))}</td><td><input value="${esc(m.nick || "")}" placeholder="${esc(nick(m))}" onchange="setNick('${m.id}',this.value)" style="width:110px" aria-label="Rufname"></td><td class="r"><button onclick="toggleMem('${m.id}')">${m.active ? "Deaktivieren" : "Aktivieren"}</button></td></tr>`).join("")}</table>
+  <p class="mut">Der Rufname wird überall in der App angezeigt (leer = erster Vorname). Im PDF steht weiterhin „Nachname, Vorname“.</p>
   <div class="row" style="margin-top:10px"><input id="ml" placeholder="Nachname" class="grow"><input id="mf" placeholder="Vorname" class="grow"><button onclick="addMem()">Hinzufügen</button></div>
   <p class="mut">Deaktivierte Mitglieder erscheinen nicht mehr an neuen Abenden und nicht im PDF.</p></div>`;
 }
+function setNick(id, v) { w(updateDoc(doc(db, "members", id), { nick: v.trim() })); }
 function toggleMem(id) { const m = S.members.find(x => x.id === id); w(updateDoc(doc(db, "members", id), { active: !m.active })); }
 function addMem() { const l = $("#ml").value.trim(), f = $("#mf").value.trim(); if (!l) return; w(setDoc(doc(db, "members", uid()), { last: l, first: f, active: true })); }
 
@@ -561,7 +564,7 @@ async function importSheet(data) {
   const findKey = n => {
     const g = (data.guests || []).find(x => x.toLowerCase() === n.toLowerCase());
     if (g) return "g:" + g.toLowerCase().replace(/[^a-z0-9äöüß]+/g, "-");
-    const hits = S.members.filter(m => memberName(m).toLowerCase().startsWith(n.toLowerCase()));
+    const hits = S.members.filter(m => memberName(m).toLowerCase().startsWith(n.toLowerCase()) || nick(m).toLowerCase() === n.toLowerCase());
     if (hits.length !== 1) throw new Error("Name nicht eindeutig: " + n);
     return hits[0].id;
   };
@@ -595,7 +598,7 @@ async function setupSeed(pins) {
 }
 
 // ---------- Start ----------
-Object.assign(window, { closeSheet, runConfirm, pickRole, login, logout, go, newEvening, setMode, setActive, back, edit, toDraft, pd, delE, freeDlg, addFreeE, toggleAbs, addGuest, delGuest, askFinal, askUnfinal, makePdf, sharePdf, openPdf, askDelete, pay, unpay, addStart, saveSettings, catSet, catDel, catAdd, toggleMem, addMem, setPin, kickAll, setupSeed, createV, shareV, endV, setStatYear, importSheet });
+Object.assign(window, { closeSheet, runConfirm, pickRole, login, logout, go, newEvening, setMode, setActive, back, edit, toDraft, pd, delE, freeDlg, addFreeE, toggleAbs, addGuest, delGuest, askFinal, askUnfinal, makePdf, sharePdf, openPdf, askDelete, pay, unpay, addStart, saveSettings, catSet, catDel, catAdd, toggleMem, addMem, setPin, kickAll, setupSeed, createV, shareV, endV, setStatYear, importSheet, setNick });
 $("#roleBtn").onclick = openLogin;
 let linkLogin = null;
 { const m = location.hash.match(/^#v-(schrift|kass)-(\d{4,})$/); if (m) { linkLogin = { r: m[1], pin: m[2] }; history.replaceState(null, "", location.pathname); } }
