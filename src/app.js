@@ -184,12 +184,21 @@ function render() {
 
 // ---------- Schriftführer ----------
 const currentEvening = () => S.evenings.find(e => e.status === "offen");
+// Nächster Termin nach Rhythmus (Standard: alle 28 Tage ab Ankerdatum); bis 2 Tage nach dem Termin gilt noch dieser Termin
+function nextDate() {
+  const a = (S.settings.anchor || "2026-11-27").split("-").map(Number), r = S.settings.rhythm || 28;
+  const anchor = Date.UTC(a[0], a[1] - 1, a[2]), day = 86400000;
+  const n = new Date(), todayUtc = Date.UTC(n.getFullYear(), n.getMonth(), n.getDate());
+  const k = Math.ceil((todayUtc - 2 * day - anchor) / (r * day));
+  return new Date(anchor + k * r * day).toISOString().slice(0, 10);
+}
+const fmtLong = d => new Date(d + "T12:00:00").toLocaleDateString("de-DE", { weekday: "long", day: "2-digit", month: "2-digit", year: "numeric" });
 function vAbend() {
   const ev = currentEvening();
   if (!ev) {
-    const now = new Date(), d = today(), t = now.toTimeString().slice(0, 5);
-    $("#main").innerHTML = `<div class="card"><h2>Neuer Kegelabend</h2><div class="row"><input type="date" id="evd" value="${d}"><input type="time" id="evt" value="${t}"><button class="pri" onclick="newEvening()">Abend anlegen</button></div>
-    <p class="mut">Die Uhrzeit ist nur zur Info.</p></div>${lastEvenings()}`; return;
+    const d = nextDate(), t = S.settings.start || "20:00";
+    $("#main").innerHTML = `<div class="card"><h2>Neuer Kegelabend</h2><p>Nächstes Kegeln: <b>${fmtLong(d)}, ${esc(t)} Uhr</b></p><div class="row"><input type="date" id="evd" value="${d}"><input type="time" id="evt" value="${t}"><button class="pri" onclick="newEvening()">Abend anlegen</button></div>
+    <p class="mut">Datum und Uhrzeit sind nach dem Kegelrhythmus vorausgefüllt und lassen sich ändern.</p></div>${lastEvenings()}`; return;
   }
   renderEvening(ev);
 }
@@ -408,12 +417,13 @@ function vKatalog() {
   <div class="row"><label class="grow">Kegelbeitrag je Abend<br><input id="sb" value="${v(S.settings.beitrag)}"></label>
   <label class="grow">Extrastrafe (nicht gezahlt)<br><input id="se" value="${v(S.settings.extra)}"></label></div>
   <div class="row" style="margin-top:8px"><label class="grow">IBAN<br><input id="si" value="${esc(S.settings.iban)}" style="width:100%"></label><label>BIC<br><input id="sc" value="${esc(S.settings.bic)}"></label></div>
+  <div class="row" style="margin-top:8px"><label class="grow">Nächster Kegeltermin<br><input type="date" id="sd" value="${nextDate()}"></label><label>Rhythmus (Tage)<br><input id="sr" inputmode="numeric" value="${S.settings.rhythm || 28}" style="width:90px"></label><label>Beginn<br><input type="time" id="st" value="${esc(S.settings.start || "20:00")}"></label></div>
   <p><button class="pri" onclick="saveSettings()">Speichern</button></p></div>
   <div class="card"><h2>Strafenkatalog</h2><table><tr><th>Strafe</th><th class="r">Betrag</th><th></th></tr>
   ${S.catalog.map(c => `<tr><td><input value="${esc(c.name)}" onchange="catSet('${c.id}','name',this.value)" style="width:100%"></td><td class="r">${c.free ? '<span class="mut">frei</span>' : `<input value="${v(c.amount)}" onchange="catSet('${c.id}','amount',this.value)" style="width:90px;text-align:right">`}</td><td class="r"><button onclick="catDel('${c.id}')">✕</button></td></tr>`).join("")}</table>
   <div class="row" style="margin-top:10px"><input id="cn" class="grow" placeholder="Neue Strafe"><input id="ca" inputmode="decimal" placeholder="€ (leer = frei)" style="width:130px"><button onclick="catAdd()">Hinzufügen</button></div></div>`;
 }
-function saveSettings() { w(setDoc(doc(db, "settings", "main"), { beitrag: toCents($("#sb").value), extra: toCents($("#se").value), iban: $("#si").value.trim(), bic: $("#sc").value.trim() })); toast("Gespeichert"); }
+function saveSettings() { w(setDoc(doc(db, "settings", "main"), { ...S.settings, beitrag: toCents($("#sb").value), extra: toCents($("#se").value), iban: $("#si").value.trim(), bic: $("#sc").value.trim(), anchor: $("#sd").value || S.settings.anchor || "2026-11-27", rhythm: parseInt($("#sr").value, 10) || 28, start: $("#st").value || "20:00" })); toast("Gespeichert"); }
 function catSet(id, f, val) { w(updateDoc(doc(db, "catalog", id), { [f]: f === "amount" ? toCents(val) : val })); }
 function catDel(id) { confirmBox("Strafe aus dem Katalog entfernen? Bereits erfasste Strafen bleiben.", "Entfernen", () => w(deleteDoc(doc(db, "catalog", id)))); }
 function catAdd() {
@@ -444,7 +454,7 @@ function vStatistik() {
   const Y = UI.statYear;
   const evs = S.evenings.filter(e => e.status === "final" && (Y === "alle" || e.date.startsWith(Y)));
   const sel = `<div class="row" style="margin-bottom:12px">${years.map(y => `<button class="${y === Y ? "sel" : ""}" onclick="setStatYear('${y}')">${y}</button>`).join("")}<button class="${Y === "alle" ? "sel" : ""}" onclick="setStatYear('alle')">Gesamt</button></div>`;
-  if (!evs.length) { $("#main").innerHTML = `<div class="card"><h2>Statistik</h2>${sel}<p class="mut">Noch keine abgeschlossenen Kegelabende in diesem Zeitraum. Die Statistik füllt sich nach dem ersten final abgeschlossenen Abend.</p></div>`; return; }
+  if (!evs.length) { $("#main").innerHTML = `<div class="hi">🎳 Nächstes Kegeln: <b>${fmtLong(nextDate())}, ${esc(S.settings.start || "20:00")} Uhr</b></div><div class="card"><h2>Statistik</h2>${sel}<p class="mut">Noch keine abgeschlossenen Kegelabende in diesem Zeitraum. Die Statistik füllt sich nach dem ersten final abgeschlossenen Abend.</p></div>`; return; }
   const mem = S.members.slice();
   const P = {}; const get = k => P[k] || (P[k] = { straf: 0, abende: 0, fehlt: 0, fehltKosten: 0, best: 0, bestDate: "", cats: {} });
   const catTotals = {}; let strafSum = 0, beitragSum = 0, anwesendSum = 0;
@@ -485,7 +495,7 @@ function vStatistik() {
   const ranking = people.map(([k, p]) => [nm(k), p.straf, p.abende ? `⌀ ${eur(Math.round(p.straf / p.abende))}` : ""]).sort((a, b) => b[1] - a[1]);
   const att = people.map(([k, p]) => [nm(k), Math.round(p.abende / evs.length * 100), `${p.abende}/${evs.length}`]).sort((a, b) => b[1] - a[1]);
   const topCats = Object.entries(catTotals).sort((a, b) => b[1] - a[1]).slice(0, 8);
-  $("#main").innerHTML = `<div class="card"><h2>Statistik</h2>${sel}
+  $("#main").innerHTML = `<div class="hi">🎳 Nächstes Kegeln: <b>${fmtLong(nextDate())}, ${esc(S.settings.start || "20:00")} Uhr</b></div><div class="card"><h2>Statistik</h2>${sel}
     <div class="cats" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">
       <div class="card" style="margin:0"><div class="mut">Kegelabende</div><b style="font-size:24px">${evs.length}</b></div>
       <div class="card" style="margin:0"><div class="mut">Strafen gesamt</div><b style="font-size:24px">${eur(strafSum)}</b></div>
