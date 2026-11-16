@@ -192,6 +192,10 @@ function nextDate() {
   const k = Math.ceil((todayUtc - 2 * day - anchor) / (r * day));
   return new Date(anchor + k * r * day).toISOString().slice(0, 10);
 }
+const ICS = "thienchristoph.github.io/kegelkasse/kegeltermine.ics";
+const calCard = () => `<div class="card"><h2>📅 Kegeltermine im eigenen Kalender</h2><p class="mut">Einmal abonnieren – die Termine erscheinen im Handykalender und passen sich bei Änderungen von selbst an.</p>
+  <div class="row"><a href="webcal://${ICS}"><button class="pri">iPhone / Outlook</button></a><a href="https://calendar.google.com/calendar/render?cid=${encodeURIComponent("webcal://" + ICS)}" target="_blank" rel="noopener"><button>Google-Kalender</button></a><button onclick="copyCal()">Link kopieren</button></div></div>`;
+async function copyCal() { try { await navigator.clipboard.writeText("https://" + ICS); toast("Kalender-Link kopiert"); } catch (e) { toast("https://" + ICS); } }
 const fmtLong = d => new Date(d + "T12:00:00").toLocaleDateString("de-DE", { weekday: "long", day: "2-digit", month: "2-digit", year: "numeric" });
 function vAbend() {
   const ev = currentEvening();
@@ -423,7 +427,9 @@ function vKatalog() {
   ${S.catalog.map(c => `<tr><td><input value="${esc(c.name)}" onchange="catSet('${c.id}','name',this.value)" style="width:100%"></td><td class="r">${c.free ? '<span class="mut">frei</span>' : `<input value="${v(c.amount)}" onchange="catSet('${c.id}','amount',this.value)" style="width:90px;text-align:right">`}</td><td class="r"><button onclick="catDel('${c.id}')">✕</button></td></tr>`).join("")}</table>
   <div class="row" style="margin-top:10px"><input id="cn" class="grow" placeholder="Neue Strafe"><input id="ca" inputmode="decimal" placeholder="€ (leer = frei)" style="width:130px"><button onclick="catAdd()">Hinzufügen</button></div></div>`;
 }
-function saveSettings() { w(setDoc(doc(db, "settings", "main"), { ...S.settings, beitrag: toCents($("#sb").value), extra: toCents($("#se").value), iban: $("#si").value.trim(), bic: $("#sc").value.trim(), anchor: $("#sd").value || S.settings.anchor || "2026-11-27", rhythm: parseInt($("#sr").value, 10) || 28, start: $("#st").value || "20:00" })); toast("Gespeichert"); }
+function saveSettings() { w(setDoc(doc(db, "settings", "main"), { ...S.settings, beitrag: toCents($("#sb").value), extra: toCents($("#se").value), iban: $("#si").value.trim(), bic: $("#sc").value.trim(), anchor: $("#sd").value || S.settings.anchor || "2026-11-27", rhythm: parseInt($("#sr").value, 10) || 28, start: $("#st").value || "20:00" }));
+  setDoc(doc(db, "public", "schedule"), { anchor: $("#sd").value || S.settings.anchor || "2026-11-27", rhythm: parseInt($("#sr").value, 10) || 28, start: $("#st").value || "20:00", updated: Date.now() }).catch(e => console.warn("Kalender-Freigabe", e));
+  toast("Gespeichert – der Kalender aktualisiert sich innerhalb einiger Stunden"); }
 function catSet(id, f, val) { w(updateDoc(doc(db, "catalog", id), { [f]: f === "amount" ? toCents(val) : val })); }
 function catDel(id) { confirmBox("Strafe aus dem Katalog entfernen? Bereits erfasste Strafen bleiben.", "Entfernen", () => w(deleteDoc(doc(db, "catalog", id)))); }
 function catAdd() {
@@ -454,7 +460,7 @@ function vStatistik() {
   const Y = UI.statYear;
   const evs = S.evenings.filter(e => e.status === "final" && (Y === "alle" || e.date.startsWith(Y)));
   const sel = `<div class="row" style="margin-bottom:12px">${years.map(y => `<button class="${y === Y ? "sel" : ""}" onclick="setStatYear('${y}')">${y}</button>`).join("")}<button class="${Y === "alle" ? "sel" : ""}" onclick="setStatYear('alle')">Gesamt</button></div>`;
-  if (!evs.length) { $("#main").innerHTML = `<div class="hi">🎳 Nächstes Kegeln: <b>${fmtLong(nextDate())}, ${esc(S.settings.start || "20:00")} Uhr</b></div><div class="card"><h2>Statistik</h2>${sel}<p class="mut">Noch keine abgeschlossenen Kegelabende in diesem Zeitraum. Die Statistik füllt sich nach dem ersten final abgeschlossenen Abend.</p></div>`; return; }
+  if (!evs.length) { $("#main").innerHTML = `<div class="hi">🎳 Nächstes Kegeln: <b>${fmtLong(nextDate())}, ${esc(S.settings.start || "20:00")} Uhr</b></div><div class="card"><h2>Statistik</h2>${sel}<p class="mut">Noch keine abgeschlossenen Kegelabende in diesem Zeitraum. Die Statistik füllt sich nach dem ersten final abgeschlossenen Abend.</p></div>${calCard()}`; return; }
   const mem = S.members.slice();
   const P = {}; const get = k => P[k] || (P[k] = { straf: 0, abende: 0, fehlt: 0, fehltKosten: 0, best: 0, bestDate: "", cats: {} });
   const catTotals = {}; let strafSum = 0, beitragSum = 0, anwesendSum = 0;
@@ -508,7 +514,7 @@ function vStatistik() {
   <div class="card"><h2>Strafen pro Kegler</h2>${bars(ranking, eur)}</div>
   <div class="card"><h2>Anwesenheit</h2>${bars(att, v => v + " %", 100)}</div>
   <div class="card"><h2>Häufigste Strafen</h2>${bars(topCats, v => v + "×")}</div>
-  <p class="mut">Grundlage: final abgeschlossene Abende, inkl. aus Papierbögen übernommener Abende. Abwesende zählen mit der Höchststrafe des Abends.</p>`;
+  <p class="mut">Grundlage: final abgeschlossene Abende, inkl. aus Papierbögen übernommener Abende. Abwesende zählen mit der Höchststrafe des Abends.</p>${calCard()}`;
 }
 
 // ---------- Vertretung ----------
@@ -608,7 +614,7 @@ async function setupSeed(pins) {
 }
 
 // ---------- Start ----------
-Object.assign(window, { closeSheet, runConfirm, pickRole, login, logout, go, newEvening, setMode, setActive, back, edit, toDraft, pd, delE, freeDlg, addFreeE, toggleAbs, addGuest, delGuest, askFinal, askUnfinal, makePdf, sharePdf, openPdf, askDelete, pay, unpay, addStart, saveSettings, catSet, catDel, catAdd, toggleMem, addMem, setPin, kickAll, setupSeed, createV, shareV, endV, setStatYear, importSheet, setNick });
+Object.assign(window, { closeSheet, runConfirm, pickRole, login, logout, go, newEvening, setMode, setActive, back, edit, toDraft, pd, delE, freeDlg, addFreeE, toggleAbs, addGuest, delGuest, askFinal, askUnfinal, makePdf, sharePdf, openPdf, askDelete, pay, unpay, addStart, saveSettings, catSet, catDel, catAdd, toggleMem, addMem, setPin, kickAll, setupSeed, createV, shareV, endV, setStatYear, importSheet, setNick, copyCal });
 $("#roleBtn").onclick = openLogin;
 let linkLogin = null;
 { const m = location.hash.match(/^#v-(schrift|kass)-(\d{4,})$/); if (m) { linkLogin = { r: m[1], pin: m[2] }; history.replaceState(null, "", location.pathname); } }

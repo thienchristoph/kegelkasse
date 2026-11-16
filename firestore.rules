@@ -38,6 +38,8 @@ service cloud.firestore {
                             && pinValid(request.resource.data.pin, request.resource.data.role);
       allow delete: if request.auth != null && (request.auth.uid == uid || hasRole(['admin']));
     }
+    // Terminplan (nur Datum, Rhythmus, Uhrzeit) – öffentlich lesbar für das Kalender-Abo
+    match /public/{id} { allow read: if true; allow write: if hasRole(['kass', 'admin']); }
     match /settings/{id} { allow read: if member(); allow write: if hasRole(['kass', 'admin']); }
     match /members/{id}  { allow read: if member(); allow write: if hasRole(['kass', 'admin']); }
     match /catalog/{id}  { allow read: if member(); allow write: if hasRole(['kass', 'admin']); }
