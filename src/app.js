@@ -477,7 +477,7 @@ function vStatistik() {
   const Y = UI.statYear;
   const evs = S.evenings.filter(e => e.status === "final" && (Y === "alle" || e.date.startsWith(Y)));
   const sel = `<div class="row" style="margin-bottom:12px">${years.map(y => `<button class="${y === Y ? "sel" : ""}" onclick="setStatYear('${y}')">${y}</button>`).join("")}<button class="${Y === "alle" ? "sel" : ""}" onclick="setStatYear('alle')">Gesamt</button></div>`;
-  if (!evs.length) { $("#main").innerHTML = `<div class="hi">🎳 Nächstes Kegeln: <b>${fmtLong(nextDate())}, ${esc(S.settings.start || "20:00")} Uhr</b></div><div class="card"><h2>Statistik</h2>${sel}<p class="mut">Noch keine abgeschlossenen Kegelabende in diesem Zeitraum. Die Statistik füllt sich nach dem ersten final abgeschlossenen Abend.</p></div>${calCard()}`; return; }
+  if (!evs.length) { $("#main").innerHTML = `<div class="hi">🎳 Nächstes Kegeln: <b>${fmtLong(nextDate())}, ${esc(S.settings.start || "20:00")} Uhr</b></div>${calCard()}<div class="card"><h2>Statistik</h2>${sel}<p class="mut">Noch keine abgeschlossenen Kegelabende in diesem Zeitraum. Die Statistik füllt sich nach dem ersten final abgeschlossenen Abend.</p></div>`; return; }
   const mem = S.members.slice();
   const P = {}; const get = k => P[k] || (P[k] = { straf: 0, abende: 0, fehlt: 0, fehltKosten: 0, best: 0, bestDate: "", cats: {} });
   const catTotals = {}; let strafSum = 0, beitragSum = 0, anwesendSum = 0;
@@ -518,7 +518,7 @@ function vStatistik() {
   const ranking = people.map(([k, p]) => [nm(k), p.straf, p.abende ? `⌀ ${eur(Math.round(p.straf / p.abende))}` : ""]).sort((a, b) => b[1] - a[1]);
   const att = people.map(([k, p]) => [nm(k), Math.round(p.abende / evs.length * 100), `${p.abende}/${evs.length}`]).sort((a, b) => b[1] - a[1]);
   const topCats = Object.entries(catTotals).sort((a, b) => b[1] - a[1]).slice(0, 8);
-  $("#main").innerHTML = `<div class="hi">🎳 Nächstes Kegeln: <b>${fmtLong(nextDate())}, ${esc(S.settings.start || "20:00")} Uhr</b></div><div class="card"><h2>Statistik</h2>${sel}
+  $("#main").innerHTML = `<div class="hi">🎳 Nächstes Kegeln: <b>${fmtLong(nextDate())}, ${esc(S.settings.start || "20:00")} Uhr</b></div>${calCard()}<div class="card"><h2>Statistik</h2>${sel}
     <div class="cats" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">
       <div class="card" style="margin:0"><div class="mut">Kegelabende</div><b style="font-size:24px">${evs.length}</b></div>
       <div class="card" style="margin:0"><div class="mut">Strafen gesamt</div><b style="font-size:24px">${eur(strafSum)}</b></div>
@@ -531,7 +531,7 @@ function vStatistik() {
   <div class="card"><h2>Strafen pro Kegler</h2>${bars(ranking, eur)}</div>
   <div class="card"><h2>Anwesenheit</h2>${bars(att, v => v + " %", 100)}</div>
   <div class="card"><h2>Häufigste Strafen</h2>${bars(topCats, v => v + "×")}</div>
-  <p class="mut">Grundlage: final abgeschlossene Abende, inkl. aus Papierbögen übernommener Abende. Abwesende zählen mit der Höchststrafe des Abends.</p>${calCard()}`;
+  <p class="mut">Grundlage: final abgeschlossene Abende, inkl. aus Papierbögen übernommener Abende. Abwesende zählen mit der Höchststrafe des Abends.</p>`;
 }
 
 // ---------- Vertretung ----------
