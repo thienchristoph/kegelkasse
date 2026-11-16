@@ -320,13 +320,13 @@ function delGuest(evId, key) { const ev = byId(evId); w(updateDoc(evRef(evId), {
 function vPruefen() {
   if (editEvening) { const ev = byId(editEvening); if (ev) return renderEvening(ev); editEvening = null; }
   const drafts = S.evenings.filter(e => e.status === "entwurf" || (role === "admin" && e.status === "offen")), finals = S.evenings.filter(e => e.status === "final");
-  const last = finals[finals.length - 1];
+  const last = finals.filter(e => !e.imported).slice(-1)[0];
   $("#main").innerHTML = `
   <div class="card"><h2>Zur Prüfung</h2>${drafts.length ? drafts.map(ev => `
     <div class="card"><div class="row"><b class="grow">Abend ${fmtDate(ev.date)}</b><button onclick="edit('${ev.id}')">Prüfen / korrigieren</button>
     <button class="pri" onclick="askFinal('${ev.id}')">Final abschließen</button>${role === "admin" ? ` <button onclick="askDelete('${ev.id}')">Löschen</button>` : ""}</div>
     ${summaryCard(ev)}</div>`).join("") : '<p class="mut">Kein Abend wartet auf Prüfung.</p>'}</div>
-  <div class="card"><h2>Abgeschlossene Abende</h2>${finals.length ? `<table>${finals.slice().reverse().map(ev => `<tr><td>${fmtDate(ev.date)}</td><td class="r"><button class="pri" onclick="makePdf('${ev.date}')">PDF erstellen</button> ${ev === last ? `<button onclick="askUnfinal('${ev.id}')">Zurücknehmen</button>` : ""}</td></tr>`).join("")}</table>` : '<p class="mut">Noch keiner.</p>'}
+  <div class="card"><h2>Abgeschlossene Abende</h2>${finals.length ? `<table>${finals.slice().reverse().map(ev => `<tr><td>${fmtDate(ev.date)}${ev.imported ? ' <span class="pill">aus Papierbogen</span>' : ""}</td><td class="r">${ev.imported ? (role === "admin" ? `<button onclick="askDelete('${ev.id}')">Löschen</button>` : "") : `<button class="pri" onclick="makePdf('${ev.date}')">PDF erstellen</button>`} ${ev === last ? `<button onclick="askUnfinal('${ev.id}')">Zurücknehmen</button>` : ""}</td></tr>`).join("")}</table>` : '<p class="mut">Noch keiner.</p>'}
   <p class="mut">Das PDF zeigt den offenen Stand je Person, so wie er gerade ist.</p></div>`;
 }
 function askFinal(id) {
@@ -495,7 +495,7 @@ function vStatistik() {
   <div class="card"><h2>Strafen pro Kegler</h2>${bars(ranking, eur)}</div>
   <div class="card"><h2>Anwesenheit</h2>${bars(att, v => v + " %", 100)}</div>
   <div class="card"><h2>Häufigste Strafen</h2>${bars(topCats, v => v + "×")}</div>
-  <p class="mut">Grundlage: final abgeschlossene Abende. Abwesende zählen mit der Höchststrafe des Abends.</p>`;
+  <p class="mut">Grundlage: final abgeschlossene Abende, inkl. aus Papierbögen übernommener Abende. Abwesende zählen mit der Höchststrafe des Abends.</p>`;
 }
 
 // ---------- Vertretung ----------
@@ -554,6 +554,31 @@ async function kickAll() {
   } catch (e) { console.error(e); toast("Fehler"); }
 }
 
+// ---------- Import alter Papierbögen (nur Statistik, keine Buchungen) ----------
+// data = { date, time, absent: [Nachname, ...], guests: [Name, ...], entries: [[Name, Strafe, Anzahl], ...] }
+async function importSheet(data) {
+  if (role !== "admin") throw new Error("nur Admin");
+  const findKey = n => {
+    const g = (data.guests || []).find(x => x.toLowerCase() === n.toLowerCase());
+    if (g) return "g:" + g.toLowerCase().replace(/[^a-z0-9äöüß]+/g, "-");
+    const hits = S.members.filter(m => memberName(m).toLowerCase().startsWith(n.toLowerCase()));
+    if (hits.length !== 1) throw new Error("Name nicht eindeutig: " + n);
+    return hits[0].id;
+  };
+  const absent = {}; (data.absent || []).forEach(n => absent[findKey(n)] = true);
+  const guests = (data.guests || []).map(n => ({ key: findKey(n) }));
+  for (const n of data.guests || []) await setDoc(doc(db, "guests", findKey(n)), { name: n });
+  const entries = [];
+  data.entries.forEach(([n, catName, count]) => {
+    const c = S.catalog.find(x => x.name.toLowerCase() === catName.toLowerCase()); if (!c) throw new Error("Strafe unbekannt: " + catName);
+    const key = findKey(n); for (let i = 0; i < count; i++) entries.push({ id: uid(), key, cat: c.id, amount: c.amount, text: c.name });
+  });
+  const id = uid();
+  await setDoc(evRef(id), { date: data.date, time: data.time || "", status: "offen", absent, guests, entries, created: Date.now(), imported: true });
+  await updateDoc(evRef(id), { status: "final" });
+  return { id, entries: entries.length, absent: Object.keys(absent).length };
+}
+
 // ---------- Ersteinrichtung (einmalig, nur bei offenen Regeln) ----------
 async function setupSeed(pins) {
   if (!auth.currentUser) await signInAnonymously(auth);
@@ -569,7 +594,7 @@ async function setupSeed(pins) {
 }
 
 // ---------- Start ----------
-Object.assign(window, { closeSheet, runConfirm, pickRole, login, logout, go, newEvening, setMode, setActive, back, edit, toDraft, pd, delE, freeDlg, addFreeE, toggleAbs, addGuest, delGuest, askFinal, askUnfinal, makePdf, sharePdf, openPdf, askDelete, pay, unpay, addStart, saveSettings, catSet, catDel, catAdd, toggleMem, addMem, setPin, kickAll, setupSeed, createV, shareV, endV, setStatYear });
+Object.assign(window, { closeSheet, runConfirm, pickRole, login, logout, go, newEvening, setMode, setActive, back, edit, toDraft, pd, delE, freeDlg, addFreeE, toggleAbs, addGuest, delGuest, askFinal, askUnfinal, makePdf, sharePdf, openPdf, askDelete, pay, unpay, addStart, saveSettings, catSet, catDel, catAdd, toggleMem, addMem, setPin, kickAll, setupSeed, createV, shareV, endV, setStatYear, importSheet });
 $("#roleBtn").onclick = openLogin;
 let linkLogin = null;
 { const m = location.hash.match(/^#v-(schrift|kass)-(\d{4,})$/); if (m) { linkLogin = { r: m[1], pin: m[2] }; history.replaceState(null, "", location.pathname); } }
