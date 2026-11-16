@@ -432,7 +432,7 @@ function addMem() { const l = $("#ml").value.trim(), f = $("#mf").value.trim(); 
 function setStatYear(y) { UI.statYear = y; render(); }
 function bars(rows, fmt, max) {
   const m = max ?? Math.max(1, ...rows.map(r => r[1]));
-  return `<table>${rows.map(([n, v, extra]) => `<tr><td style="width:40%">${esc(n)}</td><td><div style="background:var(--red);opacity:.85;height:14px;border-radius:7px;width:${Math.max(2, Math.round(v / m * 100))}%"></div></td><td class="r" style="white-space:nowrap">${fmt(v)}${extra ? ` <span class="mut">${extra}</span>` : ""}</td></tr>`).join("")}</table>`;
+  return rows.map(([n, v, extra]) => `<div style="padding:6px 0;border-bottom:1px solid var(--line)"><div class="row" style="justify-content:space-between;flex-wrap:nowrap"><span>${esc(n)}</span><span style="white-space:nowrap"><b>${fmt(v)}</b>${extra ? ` <span class="mut">${extra}</span>` : ""}</span></div><div style="background:#f0f0f3;border-radius:6px;height:10px;margin-top:4px"><div style="background:var(--red);height:10px;border-radius:6px;width:${v > 0 ? Math.max(2, Math.round(v / m * 100)) : 0}%"></div></div></div>`).join("");
 }
 function vStatistik() {
   const years = [...new Set(S.evenings.filter(e => e.status === "final").map(e => e.date.slice(0, 4)))].sort().reverse();
@@ -491,7 +491,7 @@ function vStatistik() {
       <div class="card" style="margin:0"><div class="mut">⌀ Anwesende</div><b style="font-size:24px">${(anwesendSum / evs.length).toFixed(1).replace(".", ",")}</b></div>
       <div class="card" style="margin:0"><div class="mut">Das sind etwa</div><b style="font-size:24px">🍺 ${bier}</b><div class="mut">Bier à 2,50 €</div></div>
     </div></div>
-  <div class="card"><h2>Ehrentitel</h2><div class="cats" style="grid-template-columns:repeat(auto-fill,minmax(170px,1fr))">${titles.join("")}</div></div>
+  <div class="card"><h2>Ehrentitel</h2><div class="cats" style="grid-template-columns:repeat(auto-fill,minmax(145px,1fr))">${titles.join("")}</div></div>
   <div class="card"><h2>Strafen pro Kegler</h2>${bars(ranking, eur)}</div>
   <div class="card"><h2>Anwesenheit</h2>${bars(att, v => v + " %", 100)}</div>
   <div class="card"><h2>Häufigste Strafen</h2>${bars(topCats, v => v + "×")}</div>
