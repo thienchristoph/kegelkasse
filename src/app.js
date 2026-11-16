@@ -570,6 +570,7 @@ async function importSheet(data) {
   for (const n of data.guests || []) await setDoc(doc(db, "guests", findKey(n)), { name: n });
   const entries = [];
   data.entries.forEach(([n, catName, count]) => {
+    if (catName === "Freitext") { entries.push({ id: uid(), key: findKey(n), cat: "free", amount: Math.round(count * 100), text: "Freitext (Papierbogen)" }); return; }
     const c = S.catalog.find(x => x.name.toLowerCase() === catName.toLowerCase()); if (!c) throw new Error("Strafe unbekannt: " + catName);
     const key = findKey(n); for (let i = 0; i < count; i++) entries.push({ id: uid(), key, cat: c.id, amount: c.amount, text: c.name });
   });
