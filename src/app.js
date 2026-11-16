@@ -415,13 +415,13 @@ function addMem() { const l = $("#ml").value.trim(), f = $("#mf").value.trim(); 
 
 // ---------- Admin: PINs ----------
 async function vAdmin() {
-  $("#main").innerHTML = `<div class="card"><h2>PINs ändern</h2><p class="mut">Neue PIN für eine Rolle setzen (mindestens 6 Ziffern). Die alte PIN gilt danach nicht mehr für neue Anmeldungen.</p>
+  $("#main").innerHTML = `<div class="card"><h2>PINs ändern</h2><p class="mut">Neue PIN für eine Rolle setzen (mindestens 4 Ziffern). Die alte PIN gilt danach nicht mehr für neue Anmeldungen.</p>
   <div class="row"><select id="pr">${Object.entries(ROLES).map(([k, r]) => `<option value="${k}">${r}</option>`).join("")}</select><input id="pn" inputmode="numeric" placeholder="Neue PIN" class="grow"><button class="pri" onclick="setPin()">Setzen</button></div></div>
   <div class="card"><h2>Alle Geräte abmelden</h2><p class="mut">Meldet alle Geräte ab, z. B. beim Ämterwechsel. Du bleibst angemeldet.</p><button onclick="kickAll()">Alle anderen abmelden</button></div>`;
 }
 async function setPin() {
   const r = $("#pr").value, p = $("#pn").value.trim();
-  if (!/^\d{6,}$/.test(p)) return toast("Mindestens 6 Ziffern");
+  if (!/^\d{4,}$/.test(p)) return toast("Mindestens 4 Ziffern");
   try {
     const all = await getDocs(collection(db, "pins")); const b = writeBatch(db);
     all.docs.forEach(d => { if (d.data().role === r) b.delete(d.ref); });
