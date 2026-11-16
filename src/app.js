@@ -458,12 +458,14 @@ function vStatistik() {
   const people = Object.entries(P).filter(([k]) => isMem(k) && S.members.some(m => m.id === k));
   const nm = k => shortName(k);
   const catCount = (k, needle) => Object.entries(P[k].cats).filter(([n]) => n.toLowerCase().includes(needle)).reduce((a, [, c]) => a + c, 0);
-  const champ = (fn) => { let best = null; people.forEach(([k, p]) => { const v = fn(k, p); if (v > 0 && (!best || v > best.v)) best = { k, v }; }); return best; };
+  const champ = (fn) => { let best = null; people.forEach(([k, p]) => { const v = fn(k, p); if (v > 0 && (!best || v > best.v)) best = { ks: [k], v }; else if (best && v === best.v) best.ks.push(k); }); return best; };
+  const who = w => esc(nm(w.ks[0])) + (w.ks.length > 1 ? ` <span class="mut">und ${w.ks.length - 1} weitere</span>` : "");
   const titles = [];
-  const add = (icon, title, w, txt) => { if (w) titles.push(`<div class="card" style="margin:0"><div style="font-size:28px">${icon}</div><b>${title}</b><div style="font-size:18px;margin:4px 0">${esc(nm(w.k))}</div><div class="mut">${txt(w.v)}</div></div>`); };
+  const add = (icon, title, w, txt) => { if (w) titles.push(`<div class="card" style="margin:0"><div style="font-size:28px">${icon}</div><b>${title}</b><div style="font-size:18px;margin:4px 0">${who(w)}</div><div class="mut">${txt(w.v)}</div></div>`); };
   add("💰", "Hauptsponsor der Kegeltour", champ((k, p) => p.straf), v => `${eur(v)} Strafen`);
-  const weiss = people.filter(([, p]) => p.abende >= Math.min(3, evs.length)).map(([k, p]) => ({ k, v: p.straf / p.abende })).sort((a, b) => a.v - b.v)[0];
-  if (weiss) titles.push(`<div class="card" style="margin:0"><div style="font-size:28px">😇</div><b>Weiße Weste</b><div style="font-size:18px;margin:4px 0">${esc(nm(weiss.k))}</div><div class="mut">nur ${eur(Math.round(weiss.v))} Strafen pro Abend</div></div>`);
+  const wl = people.filter(([, p]) => p.abende >= Math.min(3, evs.length)).map(([k, p]) => ({ k, v: Math.round(p.straf / p.abende) })).sort((a, b) => a.v - b.v);
+  if (wl.length) { const weiss = { ks: wl.filter(x => x.v === wl[0].v).map(x => x.k), v: wl[0].v };
+    titles.push(`<div class="card" style="margin:0"><div style="font-size:28px">😇</div><b>Weiße Weste</b><div style="font-size:18px;margin:4px 0">${who(weiss)}</div><div class="mut">nur ${eur(weiss.v)} Strafen pro Abend</div></div>`); }
   add("🎳", "Pumpenkönig", champ(k => catCount(k, "pumpe")), v => `${v}× gepumpt`);
   add("🗣️", "Plaudertasche", champ(k => catCount(k, "vorsagen")), v => `${v}× vorgesagt`);
   add("🃏", "Betrüger vom Dienst", champ(k => catCount(k, "betrug")), v => `${v}× erwischt`);
