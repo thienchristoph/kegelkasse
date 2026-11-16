@@ -304,12 +304,12 @@ function delGuest(evId, key) { const ev = byId(evId); w(updateDoc(evRef(evId), {
 // ---------- Präsident ----------
 function vPruefen() {
   if (editEvening) { const ev = byId(editEvening); if (ev) return renderEvening(ev); editEvening = null; }
-  const drafts = S.evenings.filter(e => e.status === "entwurf"), finals = S.evenings.filter(e => e.status === "final");
+  const drafts = S.evenings.filter(e => e.status === "entwurf" || (role === "admin" && e.status === "offen")), finals = S.evenings.filter(e => e.status === "final");
   const last = finals[finals.length - 1];
   $("#main").innerHTML = `
   <div class="card"><h2>Zur Prüfung</h2>${drafts.length ? drafts.map(ev => `
     <div class="card"><div class="row"><b class="grow">Abend ${fmtDate(ev.date)}</b><button onclick="edit('${ev.id}')">Prüfen / korrigieren</button>
-    <button class="pri" onclick="askFinal('${ev.id}')">Final abschließen</button></div>
+    <button class="pri" onclick="askFinal('${ev.id}')">Final abschließen</button>${role === "admin" ? ` <button onclick="askDelete('${ev.id}')">Löschen</button>` : ""}</div>
     ${summaryCard(ev)}</div>`).join("") : '<p class="mut">Kein Abend wartet auf Prüfung.</p>'}</div>
   <div class="card"><h2>Abgeschlossene Abende</h2>${finals.length ? `<table>${finals.slice().reverse().map(ev => `<tr><td>${fmtDate(ev.date)}</td><td class="r"><button class="pri" onclick="makePdf('${ev.date}')">PDF erstellen</button> ${ev === last ? `<button onclick="askUnfinal('${ev.id}')">Zurücknehmen</button>` : ""}</td></tr>`).join("")}</table>` : '<p class="mut">Noch keiner.</p>'}
   <p class="mut">Das PDF zeigt den offenen Stand je Person, so wie er gerade ist.</p></div>`;
@@ -317,6 +317,10 @@ function vPruefen() {
 function askFinal(id) {
   const ev = byId(id);
   confirmBox(`Abend ${fmtDate(ev.date)} final abschließen? Wer noch offene Beträge hat, bekommt die Extrastrafe von ${eur(S.settings.extra)}.`, "Final abschließen", () => finalize(ev));
+}
+function askDelete(id) {
+  const ev = byId(id);
+  confirmBox(`Abend ${fmtDate(ev.date)} komplett löschen? Alle erfassten Strafen dieses Abends gehen verloren.`, "Löschen", () => { w(deleteDoc(evRef(id))); toast("Abend gelöscht"); });
 }
 function finalize(ev) {
   const b = writeBatch(db);
@@ -355,10 +359,14 @@ async function makePdf(date) {
   const url = URL.createObjectURL(blob);
   const canShare = navigator.canShare && navigator.canShare({ files: [file] });
   window._pdfFile = file;
-  sheet(`<div class="row"><h2 class="grow" style="margin:0">${esc(name)}</h2><button onclick="closeSheet()">Schließen</button></div>
-  <div class="row" style="margin:10px 0">${canShare ? `<button class="pri" onclick="sharePdf()">Teilen (z. B. WhatsApp)</button>` : ""}<a href="${url}" download="${esc(name)}"><button>Herunterladen</button></a></div>
-  <iframe src="${url}" style="width:100%;height:70vh;border:1px solid #ddd;border-radius:8px"></iframe>`);
+  window._pdfUrl = url;
+  sheet(`<div class="row"><h2 class="grow" style="margin:0">PDF ist fertig</h2><button onclick="closeSheet()">Schließen</button></div>
+  <p class="mut">${esc(name)}</p>
+  <div class="row" style="margin:10px 0">${canShare ? `<button class="pri" onclick="sharePdf()">Teilen (z. B. WhatsApp)</button>` : ""}<button onclick="openPdf()">Öffnen</button><a href="${url}" download="${esc(name)}"><button>Herunterladen</button></a></div>
+  <div class="card"><h2>Ausstehende Kegelbeiträge zum ${fmtDate(date)}</h2><table><tr><th>Name</th><th class="r">Ausstehend</th></tr>${rows.map(([n, b]) => `<tr><td>${esc(n)}</td><td class="r">${b > 0 ? eur(b) : "- €"}</td></tr>`).join("")}</table>
+  <p class="mut">IBAN: ${esc(S.settings.iban)} · BIC: ${esc(S.settings.bic)}</p></div>`);
 }
+function openPdf() { const a = document.createElement("a"); a.href = window._pdfUrl; a.target = "_blank"; a.rel = "noopener"; document.body.appendChild(a); a.click(); a.remove(); }
 async function sharePdf() { try { await navigator.share({ files: [window._pdfFile], title: window._pdfFile.name }); } catch (e) { } }
 
 // ---------- Kassierer ----------
@@ -442,7 +450,7 @@ async function setupSeed(pins) {
 }
 
 // ---------- Start ----------
-Object.assign(window, { closeSheet, runConfirm, pickRole, login, logout, go, newEvening, setMode, setActive, back, edit, toDraft, pd, delE, freeDlg, addFreeE, toggleAbs, addGuest, delGuest, askFinal, askUnfinal, makePdf, sharePdf, pay, unpay, addStart, saveSettings, catSet, catDel, catAdd, toggleMem, addMem, setPin, kickAll, setupSeed });
+Object.assign(window, { closeSheet, runConfirm, pickRole, login, logout, go, newEvening, setMode, setActive, back, edit, toDraft, pd, delE, freeDlg, addFreeE, toggleAbs, addGuest, delGuest, askFinal, askUnfinal, makePdf, sharePdf, openPdf, askDelete, pay, unpay, addStart, saveSettings, catSet, catDel, catAdd, toggleMem, addMem, setPin, kickAll, setupSeed });
 $("#roleBtn").onclick = openLogin;
 try { role = localStorage.getItem("kk-role"); } catch (e) { }
 onAuthStateChanged(auth, async u => {
