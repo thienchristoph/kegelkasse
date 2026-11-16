@@ -5,6 +5,7 @@ import {
   collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, getDoc, getDocs, writeBatch, query, where, Timestamp
 } from "firebase/firestore";
 import { jsPDF } from "jspdf";
+import { utils as XU, write as xwrite } from "xlsx";
 import { firebaseConfig } from "./config.js";
 
 // ---------- Firebase ----------
@@ -423,9 +424,25 @@ function vKatalog() {
   <div class="row" style="margin-top:8px"><label class="grow">IBAN<br><input id="si" value="${esc(S.settings.iban)}" style="width:100%"></label><label>BIC<br><input id="sc" value="${esc(S.settings.bic)}"></label></div>
   <div class="row" style="margin-top:8px"><label class="grow">Nächster Kegeltermin<br><input type="date" id="sd" value="${nextDate()}"></label><label>Rhythmus (Tage)<br><input id="sr" inputmode="numeric" value="${S.settings.rhythm || 28}" style="width:90px"></label><label>Beginn<br><input type="time" id="st" value="${esc(S.settings.start || "20:00")}"></label></div>
   <p><button class="pri" onclick="saveSettings()">Speichern</button></p></div>
+  <div class="card"><h2>Datensicherung</h2><p class="mut">Lädt alle Daten als Excel-Datei herunter: Mitglieder, Strafenkatalog, alle Abende mit jeder einzelnen Strafe, Buchungen und Einstellungen. Am besten nach jedem Kegelabend einmal sichern.</p><button onclick="exportXlsx()">Excel-Sicherung herunterladen</button></div>
   <div class="card"><h2>Strafenkatalog</h2><table><tr><th>Strafe</th><th class="r">Betrag</th><th></th></tr>
   ${S.catalog.map(c => `<tr><td><input value="${esc(c.name)}" onchange="catSet('${c.id}','name',this.value)" style="width:100%"></td><td class="r">${c.free ? '<span class="mut">frei</span>' : `<input value="${v(c.amount)}" onchange="catSet('${c.id}','amount',this.value)" style="width:90px;text-align:right">`}</td><td class="r"><button onclick="catDel('${c.id}')">✕</button></td></tr>`).join("")}</table>
   <div class="row" style="margin-top:10px"><input id="cn" class="grow" placeholder="Neue Strafe"><input id="ca" inputmode="decimal" placeholder="€ (leer = frei)" style="width:130px"><button onclick="catAdd()">Hinzufügen</button></div></div>`;
+}
+function exportXlsx() {
+  const d = n => (n / 100);
+  const wb = XU.book_new();
+  const add = (name, rows) => XU.book_append_sheet(wb, XU.json_to_sheet(rows.length ? rows : [{}]), name);
+  add("Mitglieder", S.members.map(m => ({ Nachname: m.last, Vorname: m.first, Rufname: nick(m), Aktiv: m.active ? "ja" : "nein", Offen_EUR: d(balance(m.id)), ID: m.id })));
+  add("Gäste", Object.entries(S.guests).map(([k, n]) => ({ Name: n, Offen_EUR: d(balance(k)), ID: k })));
+  add("Strafenkatalog", S.catalog.map(c => ({ Strafe: c.name, Betrag_EUR: c.free ? "frei" : d(c.amount), ID: c.id })));
+  add("Abende", S.evenings.map(e => ({ Datum: e.date, Uhrzeit: e.time, Status: e.status, Papierbogen: e.imported ? "ja" : "", Anwesend: present(e).length, Abwesend: Object.keys(e.absent || {}).map(personName).join(", "), Gäste: e.guests.map(g => personName(g.key)).join(", "), Strafen_EUR: d(e.entries.reduce((a, x) => a + x.amount, 0)), ID: e.id })));
+  add("Strafen", S.evenings.flatMap(e => e.entries.map(x => ({ Datum: e.date, Name: personName(x.key), Strafe: x.text, Betrag_EUR: d(x.amount), Abend_ID: e.id }))));
+  add("Buchungen", S.ledger.slice().sort((a, b) => (a.date || "").localeCompare(b.date || "")).map(l => ({ Datum: l.date, Name: personName(l.key), Art: l.type, Text: l.text, Betrag_EUR: d(l.amount), ID: l.id })));
+  add("Einstellungen", [{ Beitrag_EUR: d(S.settings.beitrag), Extrastrafe_EUR: d(S.settings.extra), IBAN: S.settings.iban, BIC: S.settings.bic, Nächster_Termin: nextDate(), Rhythmus_Tage: S.settings.rhythm || 28, Beginn: S.settings.start || "20:00", Exportiert: new Date().toLocaleString("de-DE") }]);
+  const blob = new Blob([xwrite(wb, { bookType: "xlsx", type: "array" })], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `${today().replace(/-/g, "_")}_Kegelkasse_Sicherung.xlsx`; document.body.appendChild(a); a.click(); a.remove();
+  toast("Sicherung wird heruntergeladen");
 }
 function saveSettings() { w(setDoc(doc(db, "settings", "main"), { ...S.settings, beitrag: toCents($("#sb").value), extra: toCents($("#se").value), iban: $("#si").value.trim(), bic: $("#sc").value.trim(), anchor: $("#sd").value || S.settings.anchor || "2026-11-27", rhythm: parseInt($("#sr").value, 10) || 28, start: $("#st").value || "20:00" }));
   setDoc(doc(db, "public", "schedule"), { anchor: $("#sd").value || S.settings.anchor || "2026-11-27", rhythm: parseInt($("#sr").value, 10) || 28, start: $("#st").value || "20:00", updated: Date.now() }).catch(e => console.warn("Kalender-Freigabe", e));
@@ -614,7 +631,7 @@ async function setupSeed(pins) {
 }
 
 // ---------- Start ----------
-Object.assign(window, { closeSheet, runConfirm, pickRole, login, logout, go, newEvening, setMode, setActive, back, edit, toDraft, pd, delE, freeDlg, addFreeE, toggleAbs, addGuest, delGuest, askFinal, askUnfinal, makePdf, sharePdf, openPdf, askDelete, pay, unpay, addStart, saveSettings, catSet, catDel, catAdd, toggleMem, addMem, setPin, kickAll, setupSeed, createV, shareV, endV, setStatYear, importSheet, setNick, copyCal });
+Object.assign(window, { closeSheet, runConfirm, pickRole, login, logout, go, newEvening, setMode, setActive, back, edit, toDraft, pd, delE, freeDlg, addFreeE, toggleAbs, addGuest, delGuest, askFinal, askUnfinal, makePdf, sharePdf, openPdf, askDelete, pay, unpay, addStart, saveSettings, catSet, catDel, catAdd, toggleMem, addMem, setPin, kickAll, setupSeed, createV, shareV, endV, setStatYear, importSheet, setNick, copyCal, exportXlsx });
 $("#roleBtn").onclick = openLogin;
 let linkLogin = null;
 { const m = location.hash.match(/^#v-(schrift|kass)-(\d{4,})$/); if (m) { linkLogin = { r: m[1], pin: m[2] }; history.replaceState(null, "", location.pathname); } }
