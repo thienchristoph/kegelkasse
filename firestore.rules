@@ -1,32 +1,56 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    function pinPath(p) { return /databases/$(database)/documents/pins/$(p); }
     function sess() { return /databases/$(database)/documents/sessions/$(request.auth.uid); }
+    // PIN gültig: existiert, passt zur Rolle und ist (bei Vertretungen) nicht abgelaufen
+    function pinValid(p, role) {
+      let d = get(pinPath(p)).data;
+      return exists(pinPath(p)) && d.role == role && (!('until' in d) || request.time < d.until);
+    }
     function signed() { return request.auth != null && exists(sess()); }
-    function hasRole(roles) { return signed() && get(sess()).data.role in roles; }
-    function pinOk(d) { return exists(/databases/$(database)/documents/pins/$(d.pin))
-                          && get(/databases/$(database)/documents/pins/$(d.pin)).data.role == d.role; }
+    function hasRole(roles) {
+      let s = get(sess()).data;
+      return signed() && s.role in roles && pinValid(s.pin, s.role);
+    }
+    function member() { return hasRole(['schrift', 'praes', 'kass', 'admin']); }
+    // eingeloggt mit eigener (nicht-Vertretungs-)PIN
+    function isHolder() { return signed() && !('until' in get(pinPath(get(sess()).data.pin)).data); }
 
-    match /pins/{pin} { allow read, write: if hasRole(['admin']); }
+    match /pins/{pin} {
+      allow read, write: if hasRole(['admin']);
+      // Vertretung anlegen: nur Schriftführer/Kassierer für ihre eigene Rolle, Präsident für beide; max. 25 Stunden
+      allow create: if request.resource.data.vertretung == true
+                    && request.resource.data.role in ['schrift', 'kass']
+                    && request.resource.data.until is timestamp
+                    && request.resource.data.until <= request.time + duration.value(25, 'h')
+                    && isHolder()
+                    && (hasRole([request.resource.data.role]) || hasRole(['praes']));
+      allow get, delete: if resource.data.vertretung == true
+                    && isHolder() && (hasRole([resource.data.role]) || hasRole(['praes']));
+      allow list: if resource.data.vertretung == true
+                    && isHolder() && (hasRole([resource.data.role]) || hasRole(['praes']));
+    }
     match /sessions/{uid} {
       allow get: if request.auth != null && (request.auth.uid == uid || hasRole(['admin']));
       allow list: if hasRole(['admin']);
-      allow create, update: if request.auth != null && request.auth.uid == uid && pinOk(request.resource.data);
+      allow create, update: if request.auth != null && request.auth.uid == uid
+                            && pinValid(request.resource.data.pin, request.resource.data.role);
       allow delete: if request.auth != null && (request.auth.uid == uid || hasRole(['admin']));
     }
-    match /settings/{id} { allow read: if signed(); allow write: if hasRole(['kass', 'admin']); }
-    match /members/{id}  { allow read: if signed(); allow write: if hasRole(['kass', 'admin']); }
-    match /catalog/{id}  { allow read: if signed(); allow write: if hasRole(['kass', 'admin']); }
-    match /guests/{id}   { allow read: if signed(); allow write: if hasRole(['schrift', 'praes', 'admin']); }
+    match /settings/{id} { allow read: if member(); allow write: if hasRole(['kass', 'admin']); }
+    match /members/{id}  { allow read: if member(); allow write: if hasRole(['kass', 'admin']); }
+    match /catalog/{id}  { allow read: if member(); allow write: if hasRole(['kass', 'admin']); }
+    match /guests/{id}   { allow read: if member(); allow write: if hasRole(['schrift', 'praes', 'admin']); }
     match /evenings/{id} {
-      allow read: if signed();
+      allow read: if member();
       allow create: if hasRole(['schrift', 'admin']) && request.resource.data.status == 'offen';
       allow update: if hasRole(['praes', 'admin'])
                     || (hasRole(['schrift']) && resource.data.status == 'offen' && request.resource.data.status in ['offen', 'entwurf']);
       allow delete: if hasRole(['admin']);
     }
     match /ledger/{id} {
-      allow read: if signed();
+      allow read: if member();
       allow create: if (hasRole(['praes', 'admin']) && request.resource.data.type in ['abend', 'extra'])
                     || (hasRole(['kass', 'admin']) && request.resource.data.type in ['zahlung', 'start']);
       allow delete: if (hasRole(['praes', 'admin']) && resource.data.type in ['abend', 'extra'])

@@ -2,7 +2,7 @@ import { initializeApp } from "firebase/app";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 import {
   initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
-  collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, getDoc, getDocs, writeBatch
+  collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc, getDoc, getDocs, writeBatch, query, where, Timestamp
 } from "firebase/firestore";
 import { jsPDF } from "jspdf";
 import { firebaseConfig } from "./config.js";
@@ -28,6 +28,8 @@ const S = { members: [], catalog: [], settings: { beitrag: 1500, extra: 250, iba
 let role = null, view = null, editEvening = null, loaded = {};
 const UI = { mode: null, active: null };
 let pending = false;
+let isVertreter = false; try { isVertreter = localStorage.getItem("kk-vertr") === "1"; } catch (e) { }
+let vList = [];
 
 // ---------- Rechenlogik ----------
 const memberName = m => `${m.last}, ${m.first}`;
@@ -99,20 +101,24 @@ function pickRole(k) { pickedRole = k; document.querySelectorAll("#rsel button")
 async function login() {
   if (!pickedRole) return toast("Bitte Rolle wählen");
   const pin = $("#pin").value.trim(); if (!pin) return toast("Bitte PIN eingeben");
+  await doLogin(pickedRole, pin, false);
+}
+async function doLogin(r, pin, vertr) {
   if (!navigator.onLine) return toast("Für die Anmeldung wird Internet gebraucht");
   try {
     if (!auth.currentUser) await signInAnonymously(auth);
-    const p = setDoc(doc(db, "sessions", auth.currentUser.uid), { role: pickedRole, pin, at: Date.now() });
+    const p = setDoc(doc(db, "sessions", auth.currentUser.uid), { role: r, pin, at: Date.now() });
     await Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 12000))]);
-    role = pickedRole; try { localStorage.setItem("kk-role", role); } catch (e) { }
-    closeSheet(); view = null; startListeners(); render(); toast(`Angemeldet als ${ROLES[role]}`);
+    role = r; isVertreter = vertr;
+    try { localStorage.setItem("kk-role", role); localStorage.setItem("kk-vertr", vertr ? "1" : "0"); } catch (e) { }
+    closeSheet(); view = null; startListeners(); render(); toast(vertr ? `Als Vertretung angemeldet: ${ROLES[role]}` : `Angemeldet als ${ROLES[role]}`);
   } catch (e) {
-    console.error(e); toast(e.message === "timeout" ? "Keine Verbindung – bitte später erneut" : "PIN falsch");
+    console.error(e); toast(e.message === "timeout" ? "Keine Verbindung – bitte später erneut" : vertr ? "Vertretung ist abgelaufen oder beendet" : "PIN falsch");
   }
 }
 async function logout() {
   try { await deleteDoc(doc(db, "sessions", auth.currentUser.uid)); } catch (e) { }
-  role = null; try { localStorage.removeItem("kk-role"); } catch (e) { }
+  role = null; isVertreter = false; try { localStorage.removeItem("kk-role"); localStorage.removeItem("kk-vertr"); } catch (e) { }
   stopListeners(); closeSheet(); render();
 }
 
@@ -133,10 +139,15 @@ function startListeners() {
     track("evenings", s); renderSafe();
   }, onErr));
   unsubs.push(onSnapshot(collection(db, "ledger"), opt, s => { S.ledger = s.docs.map(d => ({ id: d.id, ...d.data() })); track("ledger", s); renderSafe(); }, onErr));
+  if (!isVertreter) {
+    const q = (role === "praes" || role === "admin") ? query(collection(db, "pins"), where("vertretung", "==", true))
+      : query(collection(db, "pins"), where("vertretung", "==", true), where("role", "==", role));
+    unsubs.push(onSnapshot(q, s => { vList = s.docs.map(d => ({ pin: d.id, ...d.data() })); renderSafe(); }, e => console.warn(e)));
+  }
 }
 function onErr(e) {
   console.error(e);
-  if (e.code === "permission-denied") { role = null; try { localStorage.removeItem("kk-role"); } catch (x) { } stopListeners(); render(); toast("Bitte neu anmelden"); }
+  if (e.code === "permission-denied") { const v = isVertreter; role = null; isVertreter = false; try { localStorage.removeItem("kk-role"); localStorage.removeItem("kk-vertr"); } catch (x) { } stopListeners(); render(); toast(v ? "Die Vertretung ist beendet – danke!" : "Bitte neu anmelden"); }
 }
 
 // ---------- Navigation ----------
@@ -145,6 +156,7 @@ function tabs() {
   if (role === "schrift" || role === "admin") t.push(["abend", "Kegelabend"]);
   if (role === "praes" || role === "admin") t.push(["pruefen", "Prüfen & PDF"]);
   if (role === "kass" || role === "admin") t.push(["offen", "Offene Beträge"], ["katalog", "Katalog & Einstellungen"], ["mitglieder", "Mitglieder"]);
+  if (!isVertreter) t.push(["vertretung", "Vertretung"]);
   if (role === "admin") t.push(["admin", "PINs"]);
   return t;
 }
@@ -163,7 +175,8 @@ function render() {
   if (!loaded.evenings || !loaded.members) { $("#main").innerHTML = `<div class="card">Lade Daten …</div>`; return; }
   if (!view || !t.find(x => x[0] === view)) view = t[0][0];
   $("#nav").innerHTML = t.map(([k, l]) => `<button class="${k === view ? "sel" : ""}" onclick="go('${k}')">${l}</button>`).join("");
-  ({ abend: vAbend, pruefen: vPruefen, offen: vOffen, katalog: vKatalog, mitglieder: vMitglieder, admin: vAdmin })[view]();
+  ({ abend: vAbend, pruefen: vPruefen, offen: vOffen, katalog: vKatalog, mitglieder: vMitglieder, admin: vAdmin, vertretung: vVertretung })[view]();
+  if (isVertreter) $("#main").insertAdjacentHTML("afterbegin", `<div class="hi">Du bist als <b>Vertretung</b> für ${ROLES[role]} angemeldet. Der Zugang endet automatisch.</div>`);
 }
 
 // ---------- Schriftführer ----------
@@ -413,9 +426,43 @@ function vMitglieder() {
 function toggleMem(id) { const m = S.members.find(x => x.id === id); w(updateDoc(doc(db, "members", id), { active: !m.active })); }
 function addMem() { const l = $("#ml").value.trim(), f = $("#mf").value.trim(); if (!l) return; w(setDoc(doc(db, "members", uid()), { last: l, first: f, active: true })); }
 
+// ---------- Vertretung ----------
+const fmtDT = ms => new Date(ms).toLocaleString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }) + " Uhr";
+const vLink = v => `${location.origin}${location.pathname}#v-${v.role}-${v.pin}`;
+const vText = v => `Hallo! Du vertrittst heute in der Kegelkasse KC Red Snapper als ${ROLES[v.role]} (gültig bis ${fmtDT(v.until.toMillis())}). Einfach hier tippen, dann bist du direkt angemeldet: ${vLink(v)}`;
+function vVertretung() {
+  const roles = (role === "praes" || role === "admin") ? ["schrift", "kass"] : [role];
+  const now = Date.now();
+  $("#main").innerHTML = roles.map(r => {
+    const act = vList.filter(v => v.role === r && v.until && v.until.toMillis() > now);
+    return `<div class="card"><h2>Vertretung ${ROLES[r]}</h2>${act.length ? act.map(v => `
+      <p>Aktiv bis <b>${fmtDT(v.until.toMillis())}</b> · PIN <b>${esc(v.pin)}</b></p>
+      <div class="row"><a href="https://wa.me/?text=${encodeURIComponent(vText(v))}" target="_blank" rel="noopener"><button class="ok">Per WhatsApp senden</button></a>
+      <button onclick="shareV('${v.pin}')">Anders teilen</button><button onclick="endV('${v.pin}')">Vertretung beenden</button></div>`).join("")
+      : `<p class="mut">Der Vertreter bekommt einen Link, mit dem er direkt angemeldet ist. Der Zugang gilt 24 Stunden und nur für diese Rolle.</p>
+      <button class="pri" onclick="createV('${r}')">Vertretung einrichten</button>`}</div>`;
+  }).join("");
+}
+async function createV(r) {
+  if (!navigator.onLine) return toast("Dafür wird Internet gebraucht");
+  for (let i = 0; i < 6; i++) {
+    const pin = String(Math.floor(1000 + Math.random() * 9000));
+    try {
+      await setDoc(doc(db, "pins", pin), { role: r, vertretung: true, until: Timestamp.fromMillis(Date.now() + 24 * 3600 * 1000), by: auth.currentUser.uid });
+      toast("Vertretung eingerichtet"); return;
+    } catch (e) { console.warn(e); }
+  }
+  toast("Hat nicht geklappt – bitte erneut versuchen");
+}
+async function shareV(pin) {
+  const v = vList.find(x => x.pin === pin); if (!v) return;
+  try { if (navigator.share) await navigator.share({ text: vText(v) }); else { await navigator.clipboard.writeText(vText(v)); toast("Text kopiert"); } } catch (e) { }
+}
+function endV(pin) { confirmBox("Vertretung jetzt beenden? Der Vertreter wird sofort abgemeldet.", "Beenden", () => { w(deleteDoc(doc(db, "pins", pin))); toast("Vertretung beendet"); }); }
+
 // ---------- Admin: PINs ----------
 async function vAdmin() {
-  $("#main").innerHTML = `<div class="card"><h2>PINs ändern</h2><p class="mut">Neue PIN für eine Rolle setzen (mindestens 4 Ziffern). Die alte PIN gilt danach nicht mehr für neue Anmeldungen.</p>
+  $("#main").innerHTML = `<div class="card"><h2>PINs ändern</h2><p class="mut">Neue PIN für eine Rolle setzen (mindestens 4 Ziffern). Die alte PIN wird sofort ungültig, wer damit angemeldet ist, wird abgemeldet.</p>
   <div class="row"><select id="pr">${Object.entries(ROLES).map(([k, r]) => `<option value="${k}">${r}</option>`).join("")}</select><input id="pn" inputmode="numeric" placeholder="Neue PIN" class="grow"><button class="pri" onclick="setPin()">Setzen</button></div></div>
   <div class="card"><h2>Alle Geräte abmelden</h2><p class="mut">Meldet alle Geräte ab, z. B. beim Ämterwechsel. Du bleibst angemeldet.</p><button onclick="kickAll()">Alle anderen abmelden</button></div>`;
 }
@@ -424,7 +471,7 @@ async function setPin() {
   if (!/^\d{4,}$/.test(p)) return toast("Mindestens 4 Ziffern");
   try {
     const all = await getDocs(collection(db, "pins")); const b = writeBatch(db);
-    all.docs.forEach(d => { if (d.data().role === r) b.delete(d.ref); });
+    all.docs.forEach(d => { if (d.data().role === r && !d.data().vertretung) b.delete(d.ref); });
     b.set(doc(db, "pins", p), { role: r }); await b.commit(); $("#pn").value = ""; toast(`PIN für ${ROLES[r]} geändert`);
   } catch (e) { console.error(e); toast("Fehler beim Speichern"); }
 }
@@ -450,8 +497,10 @@ async function setupSeed(pins) {
 }
 
 // ---------- Start ----------
-Object.assign(window, { closeSheet, runConfirm, pickRole, login, logout, go, newEvening, setMode, setActive, back, edit, toDraft, pd, delE, freeDlg, addFreeE, toggleAbs, addGuest, delGuest, askFinal, askUnfinal, makePdf, sharePdf, openPdf, askDelete, pay, unpay, addStart, saveSettings, catSet, catDel, catAdd, toggleMem, addMem, setPin, kickAll, setupSeed });
+Object.assign(window, { closeSheet, runConfirm, pickRole, login, logout, go, newEvening, setMode, setActive, back, edit, toDraft, pd, delE, freeDlg, addFreeE, toggleAbs, addGuest, delGuest, askFinal, askUnfinal, makePdf, sharePdf, openPdf, askDelete, pay, unpay, addStart, saveSettings, catSet, catDel, catAdd, toggleMem, addMem, setPin, kickAll, setupSeed, createV, shareV, endV });
 $("#roleBtn").onclick = openLogin;
+let linkLogin = null;
+{ const m = location.hash.match(/^#v-(schrift|kass)-(\d{4,})$/); if (m) { linkLogin = { r: m[1], pin: m[2] }; history.replaceState(null, "", location.pathname); } }
 try { role = localStorage.getItem("kk-role"); } catch (e) { }
 onAuthStateChanged(auth, async u => {
   if (u && role) {
@@ -459,5 +508,6 @@ onAuthStateChanged(auth, async u => {
     catch (e) { startListeners(); } // offline: Rolle aus dem Gerätespeicher
   } else if (!u) role = null;
   syncBar(); render();
+  if (linkLogin) { const l = linkLogin; linkLogin = null; await doLogin(l.r, l.pin, true); }
 });
 syncBar(); render();
